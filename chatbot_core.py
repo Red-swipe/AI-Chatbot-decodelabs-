@@ -1,5 +1,7 @@
 import string
 import os
+import re
+import operator
 from datetime import datetime
 
 MEMORY_FILE = "memory.txt"
@@ -176,6 +178,66 @@ def extract_name(text):
     return None
 
 
+_OP_MAP = {
+    "+": operator.add,
+    "-": operator.sub,
+    "*": operator.mul,
+    "/": operator.truediv,
+    "//": operator.floordiv,
+    "%": operator.mod,
+}
+
+
+def detect_arithmetic(text):
+    patterns = [
+        rf"(\d+(?:\.\d+)?)\s*({''.join(re.escape(op) for op in _OP_MAP)})\s*(\d+(?:\.\d+)?)",
+        rf"what\s+is\s+(\d+(?:\.\d+)?)\s*({''.join(re.escape(op) for op in _OP_MAP)})\s*(\d+(?:\.\d+)?)",
+        rf"calculate\s+(\d+(?:\.\d+)?)\s*({''.join(re.escape(op) for op in _OP_MAP)})\s*(\d+(?:\.\d+)?)",
+        rf"what's\s+(\d+(?:\.\d+)?)\s*({''.join(re.escape(op) for op in _OP_MAP)})\s*(\d+(?:\.\d+)?)",
+        rf"what\s+is\s+(\d+(?:\.\d+)?)\s+(plus|minus|times|divided\s+by)\s+(\d+(?:\.\d+)?)",
+        rf"(\d+(?:\.\d+)?)\s+(plus|minus|times|divided\s+by)\s+(\d+(?:\.\d+)?)",
+    ]
+    _WORD_OPS = {
+        "plus": "+",
+        "minus": "-",
+        "times": "*",
+        "divided by": "/",
+    }
+
+    text_lower = text.lower().strip().lstrip("?")
+    for pat in patterns:
+        m = re.search(pat, text_lower)
+        if not m:
+            continue
+        a = m.group(1)
+        op = m.group(2)
+        b = m.group(3)
+
+        if op in _WORD_OPS:
+            op = _WORD_OPS[op]
+
+        if op not in _OP_MAP:
+            continue
+
+        try:
+            a_f = float(a)
+            b_f = float(b)
+        except ValueError:
+            continue
+
+        if op == "/" and b_f == 0:
+            return "Division by zero? That's a mathematical sin!"
+
+        result = _OP_MAP[op](a_f, b_f)
+
+        if result == int(result):
+            result = int(result)
+
+        return f"{a} {op} {b} = {result}"
+
+    return None
+
+
 def get_response(user_input):
     clean = normalize(user_input)
 
@@ -216,8 +278,12 @@ def get_response(user_input):
         return fact
     elif intent:
         return INTENTS[intent]["response"]
-    else:
-        return FALLBACK
+
+    arith = detect_arithmetic(user_input)
+    if arith:
+        return arith
+
+    return FALLBACK
 
 
 def init_memory():
