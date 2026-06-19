@@ -1,7 +1,49 @@
 from flask import Flask, request, jsonify, render_template
 from chatbot_core import get_response, init_memory, increment_conversations, log_exchange, get_stored_name
+import uuid
+import json
+import os
+from datetime import datetime
 
 app = Flask(__name__)
+
+CONVERSATIONS_DIR = "conversations"
+os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
+
+
+def load_conversation(conv_id):
+    path = os.path.join(CONVERSATIONS_DIR, f"{conv_id}.json")
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+
+def save_conversation(data):
+    path = os.path.join(CONVERSATIONS_DIR, f"{data['id']}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def list_conversations():
+    convs = []
+    if not os.path.exists(CONVERSATIONS_DIR):
+        return convs
+    for fname in os.listdir(CONVERSATIONS_DIR):
+        if not fname.endswith(".json"):
+            continue
+        conv_id = fname[:-5]
+        data = load_conversation(conv_id)
+        if data:
+            msgs = data.get("messages", [])
+            convs.append({
+                "id": conv_id,
+                "title": data.get("title", "Untitled"),
+                "message_count": len(msgs),
+                "updated_at": msgs[-1]["timestamp"] if msgs else ""
+            })
+    convs.sort(key=lambda c: c["updated_at"], reverse=True)
+    return convs
 
 memory = init_memory()
 
@@ -22,14 +64,65 @@ def chat():
     if not user_input:
         return jsonify({"response": "You didn't say anything!"})
 
+    conversation_id = body.get("conversation_id")
+
+    conversation = None
+    if conversation_id:
+        conversation = load_conversation(conversation_id)
+
+    if not conversation:
+        conversation = {"id": str(uuid.uuid4()), "title": "", "messages": []}
+
     response = get_response(user_input)
     if response is None:
         response = "Goodbye! Talk to you later."
 
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    conversation["messages"].append({
+        "role": "user", "text": user_input, "timestamp": timestamp
+    })
+    conversation["messages"].append({
+        "role": "bot", "text": response, "timestamp": timestamp
+    })
+
+    if not conversation["title"]:
+        conversation["title"] = user_input[:40].rstrip()
+
     increment_conversations()
     log_exchange(user_input, response)
+    save_conversation(conversation)
 
-    return jsonify({"response": response})
+    return jsonify({"response": response, "conversation_id": conversation["id"]})
+
+
+@app.route("/conversations", methods=["GET"])
+def conversations_list():
+    return jsonify(list_conversations())
+
+
+@app.route("/conversations/new", methods=["POST"])
+def conversations_new():
+    conv = {"id": str(uuid.uuid4()), "title": "New conversation", "messages": []}
+    save_conversation(conv)
+    return jsonify({"id": conv["id"]})
+
+
+@app.route("/conversations/<conv_id>", methods=["GET"])
+def conversations_get(conv_id):
+    data = load_conversation(conv_id)
+    if data is None:
+        return jsonify({"error": "Conversation not found"}), 404
+    return jsonify(data)
+
+
+@app.route("/conversations/<conv_id>", methods=["DELETE"])
+def conversations_delete(conv_id):
+    path = os.path.join(CONVERSATIONS_DIR, f"{conv_id}.json")
+    if os.path.exists(path):
+        os.remove(path)
+        return jsonify({"status": "deleted"})
+    return jsonify({"error": "Conversation not found"}), 404
 
 
 if __name__ == "__main__":
