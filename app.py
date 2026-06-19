@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, render_template
-from chatbot_core import get_response, init_memory, increment_conversations, log_exchange
+from chatbot_core import get_response, init_memory, increment_conversations, log_exchange, get_stored_name
 
 app = Flask(__name__)
 
@@ -8,7 +8,8 @@ memory = init_memory()
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    stored_name = get_stored_name()
+    return render_template("index.html", stored_name=stored_name)
 
 
 @app.route("/chat", methods=["POST"])

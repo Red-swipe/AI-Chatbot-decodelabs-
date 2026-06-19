@@ -128,6 +128,13 @@ INTENTS = {
         ],
         "response": "AXIOM is a rule-based chatbot built entirely in Python. It uses intent-matching with keyword tokens to understand what you're saying. No AI, no APIs — just clean logic!",
     },
+    "who_am_i": {
+        "keywords": [
+            "who am i", "what is my name", "whats my name",
+            "do you know my name", "do you remember me",
+            "who do you think i am",
+        ],
+    },
     "fun_fact": {
         "keywords": [
             "tell me a fun fact", "fun fact", "interesting fact",
@@ -183,6 +190,13 @@ def get_response(user_input):
         return f"Nice to meet you, {name.capitalize()}! I've noted that."
 
     intent = match_intent(tokens)
+
+    if intent == "who_am_i":
+        data = init_memory()
+        stored = data.get("name")
+        if stored:
+            return f"You're {stored.capitalize()}! I remember."
+        return "I don't know your name yet. Tell me with 'my name is ...'"
 
     if intent == "time":
         now = datetime.now()
@@ -240,6 +254,11 @@ def increment_conversations():
     data["conversations"] = data.get("conversations", 0) + 1
     save_memory(data)
     return data["conversations"]
+
+
+def get_stored_name():
+    data = init_memory()
+    return data.get("name")
 
 
 def log_exchange(user_input, response):
