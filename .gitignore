@@ -220,3 +220,4 @@ __marimo__/
 # AXIOM runtime data
 memory.txt
 conversation_log.txt
+conversations/
