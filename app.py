@@ -1,9 +1,11 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, Response
 from chatbot_core import get_response, init_memory, increment_conversations, log_exchange, get_stored_name
 import uuid
 import json
 import os
+import re
 from datetime import datetime
+from typing import Any
 
 app = Flask(__name__)
 
@@ -11,7 +13,7 @@ CONVERSATIONS_DIR = "conversations"
 os.makedirs(CONVERSATIONS_DIR, exist_ok=True)
 
 
-def load_conversation(conv_id):
+def load_conversation(conv_id: str) -> Any:
     path = os.path.join(CONVERSATIONS_DIR, f"{conv_id}.json")
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
@@ -19,14 +21,14 @@ def load_conversation(conv_id):
     return None
 
 
-def save_conversation(data):
+def save_conversation(data: Any) -> None:
     path = os.path.join(CONVERSATIONS_DIR, f"{data['id']}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def list_conversations():
-    convs = []
+def list_conversations() -> list[dict[str, Any]]:
+    convs: list[dict[str, Any]] = []
     if not os.path.exists(CONVERSATIONS_DIR):
         return convs
     for fname in os.listdir(CONVERSATIONS_DIR):
@@ -48,14 +50,24 @@ def list_conversations():
 memory = init_memory()
 
 
+def _is_safe_origin(req: request) -> bool:
+    origin = req.headers.get("Origin") or req.headers.get("Referer")
+    if not origin:
+        return True
+    allowed = req.host_url.rstrip("/")
+    return origin.startswith(allowed)
+
+
 @app.route("/")
-def index():
+def index() -> str:
     stored_name = get_stored_name()
     return render_template("index.html", stored_name=stored_name)
 
 
 @app.route("/chat", methods=["POST"])
-def chat():
+def chat() -> tuple[Response, int] | Response:
+    if not _is_safe_origin(request):
+        return jsonify({"error": "Forbidden"}), 403
     body = request.get_json(silent=True)
     if not body or "message" not in body:
         return jsonify({"error": "Missing 'message' in JSON body"}), 400
@@ -97,19 +109,32 @@ def chat():
 
 
 @app.route("/conversations", methods=["GET"])
-def conversations_list():
+def conversations_list() -> Response:
     return jsonify(list_conversations())
 
 
 @app.route("/conversations/new", methods=["POST"])
-def conversations_new():
+def conversations_new() -> tuple[Response, int] | Response:
+    if not _is_safe_origin(request):
+        return jsonify({"error": "Forbidden"}), 403
     conv = {"id": str(uuid.uuid4()), "title": "New conversation", "messages": []}
     save_conversation(conv)
     return jsonify({"id": conv["id"]})
 
 
+_SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+def _validate_conv_id(conv_id: str) -> tuple[Response, int] | None:
+    if not _SAFE_ID_RE.match(conv_id):
+        return jsonify({"error": "Invalid conversation ID"}), 400
+    return None
+
+
 @app.route("/conversations/<conv_id>", methods=["GET"])
-def conversations_get(conv_id):
+def conversations_get(conv_id: str) -> tuple[Response, int] | Response:
+    err = _validate_conv_id(conv_id)
+    if err:
+        return err
     data = load_conversation(conv_id)
     if data is None:
         return jsonify({"error": "Conversation not found"}), 404
@@ -117,7 +142,12 @@ def conversations_get(conv_id):
 
 
 @app.route("/conversations/<conv_id>", methods=["DELETE"])
-def conversations_delete(conv_id):
+def conversations_delete(conv_id: str) -> tuple[Response, int] | Response:
+    if not _is_safe_origin(request):
+        return jsonify({"error": "Forbidden"}), 403
+    err = _validate_conv_id(conv_id)
+    if err:
+        return err
     path = os.path.join(CONVERSATIONS_DIR, f"{conv_id}.json")
     if os.path.exists(path):
         os.remove(path)

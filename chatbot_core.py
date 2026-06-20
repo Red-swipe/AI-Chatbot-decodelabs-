@@ -2,10 +2,18 @@ import string
 import os
 import re
 import operator
+import threading
 from datetime import datetime
+from typing import TypedDict
 
 MEMORY_FILE = "memory.txt"
 LOG_FILE = "conversation_log.txt"
+_mem_lock = threading.Lock()
+
+
+class _IntentConfig(TypedDict, total=False):
+    keywords: list[str]
+    response: str
 
 NAME_PATTERNS = ["my name is", "call me", "you can call me"]
 
@@ -32,17 +40,17 @@ _quote_index = 0
 _fact_index = 0
 
 
-def normalize(text):
+def normalize(text: str) -> str:
     text = text.lower().strip()
-    text = text.translate(str.maketrans('', '', string.punctuation))
+    text = re.sub(r'[^\w\s]', '', text)
     return text.strip()
 
 
-def tokenize(text):
+def tokenize(text: str) -> list[str]:
     return normalize(text).split()
 
 
-INTENTS = {
+INTENTS: dict[str, _IntentConfig] = {
     "greeting": {
         "keywords": [
             "hi", "hello", "hey", "heyy", "hii", "yo", "hey there",
@@ -149,7 +157,7 @@ INTENTS = {
 FALLBACK = "I don't understand that yet. Try asking me something else."
 
 
-def match_intent(tokens):
+def match_intent(tokens: list[str]) -> str | None:
     best_intent = None
     best_keyword_len = 0
 
@@ -165,7 +173,7 @@ def match_intent(tokens):
     return best_intent
 
 
-def extract_name(text):
+def extract_name(text: str) -> str | None:
     text_lower = text.lower().strip()
     for pattern in NAME_PATTERNS:
         if pattern in text_lower:
@@ -188,12 +196,13 @@ _OP_MAP = {
 }
 
 
-def detect_arithmetic(text):
+def detect_arithmetic(text: str) -> str | None:
+    _SYM_OPS = ''.join(re.escape(op) for op in _OP_MAP if len(op) == 1)
     patterns = [
-        rf"(\d+(?:\.\d+)?)\s*({''.join(re.escape(op) for op in _OP_MAP)})\s*(\d+(?:\.\d+)?)",
-        rf"what\s+is\s+(\d+(?:\.\d+)?)\s*({''.join(re.escape(op) for op in _OP_MAP)})\s*(\d+(?:\.\d+)?)",
-        rf"calculate\s+(\d+(?:\.\d+)?)\s*({''.join(re.escape(op) for op in _OP_MAP)})\s*(\d+(?:\.\d+)?)",
-        rf"what's\s+(\d+(?:\.\d+)?)\s*({''.join(re.escape(op) for op in _OP_MAP)})\s*(\d+(?:\.\d+)?)",
+        rf"(\d+(?:\.\d+)?)\s*([{_SYM_OPS}])\s*(\d+(?:\.\d+)?)",
+        rf"what\s+is\s+(\d+(?:\.\d+)?)\s*([{_SYM_OPS}])\s*(\d+(?:\.\d+)?)",
+        rf"calculate\s+(\d+(?:\.\d+)?)\s*([{_SYM_OPS}])\s*(\d+(?:\.\d+)?)",
+        rf"what's\s+(\d+(?:\.\d+)?)\s*([{_SYM_OPS}])\s*(\d+(?:\.\d+)?)",
         rf"what\s+is\s+(\d+(?:\.\d+)?)\s+(plus|minus|times|divided\s+by)\s+(\d+(?:\.\d+)?)",
         rf"(\d+(?:\.\d+)?)\s+(plus|minus|times|divided\s+by)\s+(\d+(?:\.\d+)?)",
     ]
@@ -238,11 +247,11 @@ def detect_arithmetic(text):
     return None
 
 
-def get_response(user_input):
+def get_response(user_input: str) -> str:
     clean = normalize(user_input)
 
     if clean in ("exit", "quit"):
-        return None
+        return "Goodbye!"
 
     tokens = tokenize(clean)
 
@@ -256,7 +265,7 @@ def get_response(user_input):
     if intent == "who_am_i":
         data = init_memory()
         stored = data.get("name")
-        if stored:
+        if isinstance(stored, str):
             return f"You're {stored.capitalize()}! I remember."
         return "I don't know your name yet. Tell me with 'my name is ...'"
 
@@ -286,49 +295,68 @@ def get_response(user_input):
     return FALLBACK
 
 
-def init_memory():
-    data = {"name": None, "conversations": 0}
-    if os.path.exists(MEMORY_FILE):
-        with open(MEMORY_FILE, "r") as f:
-            for line in f:
-                line = line.strip()
-                if ":" in line:
-                    key, _, value = line.partition(":")
-                    key = key.strip()
-                    value = value.strip()
-                    if key == "name":
-                        data["name"] = value if value else None
-                    elif key == "conversations":
-                        data["conversations"] = int(value) if value.isdigit() else 0
+def init_memory() -> dict[str, str | int | None]:
+    data: dict[str, str | int | None] = {"name": None, "conversations": 0}
+    with _mem_lock:
+        if os.path.exists(MEMORY_FILE):
+            with open(MEMORY_FILE, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if ":" in line:
+                        key, _, value = line.partition(":")
+                        key = key.strip()
+                        value = value.strip()
+                        if key == "name":
+                            data["name"] = value if value else None
+                        elif key == "conversations":
+                            data["conversations"] = int(value) if value.isdigit() else 0
     return data
 
 
-def save_memory(data):
-    with open(MEMORY_FILE, "w") as f:
-        f.write(f"name:{data.get('name', '') or ''}\n")
-        f.write(f"conversations:{data.get('conversations', 0)}\n")
+def save_memory(data: dict[str, str | int | None]) -> None:
+    with _mem_lock:
+        with open(MEMORY_FILE, "w") as f:
+            f.write(f"name:{data.get('name', '') or ''}\n")
+            f.write(f"conversations:{data.get('conversations', 0)}\n")
 
 
-def save_name(name):
+def save_name(name: str) -> None:
     data = init_memory()
     data["name"] = name.strip().lower()
     save_memory(data)
 
 
-def increment_conversations():
+def increment_conversations() -> int:
     data = init_memory()
-    data["conversations"] = data.get("conversations", 0) + 1
+    current = data.get("conversations", 0)
+    data["conversations"] = (current if isinstance(current, int) else 0) + 1
     save_memory(data)
-    return data["conversations"]
+    result = data["conversations"]
+    return result if isinstance(result, int) else 0
 
 
-def get_stored_name():
+def get_stored_name() -> str | None:
     data = init_memory()
-    return data.get("name")
+    value = data.get("name")
+    return value if isinstance(value, str) else None
 
 
-def log_exchange(user_input, response):
+def _trim_log_if_needed() -> None:
+    if not os.path.exists(LOG_FILE):
+        return
+    with open(LOG_FILE, "r") as f:
+        lines = f.readlines()
+    if len(lines) <= 1000:
+        return
+    with open(LOG_FILE, "w") as f:
+        f.writelines(lines[-1000:])
+
+
+def log_exchange(user_input: str, response: str) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sanitized_input = user_input.replace('\n', '\\n').replace('\r', '\\r')
+    sanitized_response = response.replace('\n', '\\n').replace('\r', '\\r')
+    _trim_log_if_needed()
     with open(LOG_FILE, "a") as f:
-        f.write(f"[{timestamp}] User: {user_input}\n")
-        f.write(f"[{timestamp}] AXIOM: {response}\n")
+        f.write(f"[{timestamp}] User: {sanitized_input}\n")
+        f.write(f"[{timestamp}] AXIOM: {sanitized_response}\n")
