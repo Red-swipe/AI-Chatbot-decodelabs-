@@ -4,6 +4,20 @@ A deterministic, dictionary-driven chatbot built for the DecodeLabs AI Internshi
 
 ---
 
+## 🌿 Branches
+
+This repo has **three branches**, each building on the last:
+
+| Branch | Description |
+|---|---|
+| [`main`](https://github.com/Red-swipe/decodelabs-p1-AI_Chatbot/tree/main) | Baseline — single-file CLI chatbot with dictionary-based intent matching |
+| [`branch-2`](https://github.com/Red-swipe/decodelabs-p1-AI_Chatbot/tree/branch-2) | Normalized token matching, response variety, name memory — more natural dialogue |
+| [`branch-3`](https://github.com/Red-swipe/decodelabs-p1-AI_Chatbot/tree/branch-3) | **Most advanced** — modular refactor (`chatbot_core.py` + `cli.py` + `app.py`), persistent multi-conversation JSON storage, Flask web UI with sidebar/theme switching, arithmetic via `operator` module (`eval()` banned), and all security/stability fixes |
+
+👉 **See [`branch-3`](https://github.com/Red-swipe/decodelabs-p1-AI_Chatbot/tree/branch-3) for the latest work.**
+
+---
+
 ## Project Overview
 
 This is **Project 1** of the **DecodeLabs AI Internship Track**, designed to introduce the fundamentals of rule-based deterministic logic before progressing to probabilistic and ML-based approaches.
